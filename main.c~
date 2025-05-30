@@ -1,0 +1,566 @@
+#include <stdbool.h>
+#include <string.h>
+#include <ctype.h>
+#include <stdint.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <math.h>
+
+#ifdef DEBUG
+const int debug = 1;
+#else
+const int debug = 0;
+#endif
+
+#define TOKEN_NAME 0
+#define TOKEN_SEMI 1
+#define TOKEN_OPAREN 2
+#define TOKEN_CPAREN 3
+#define TOKEN_COMMA 4
+#define TOKEN_NUMBER 5
+#define TOKEN_OCURLY 6
+#define TOKEN_CCURLY 7
+#define TOKEN_STRING_LITERAL 8
+#define TOKEN_OTAWA 9
+#define TOKEN_COLON 10
+#define TOKEN_LA 11
+#define TOKEN_ANTE 12
+#define TOKEN_O 13
+#define TOKEN_LI 14
+#define TOKEN_NANPA 100
+#define TOKEN_SITELEN 101
+#define TOKEN_SULI 102
+#define TOKEN_LILI 103
+#define TOKEN_TELO 104
+#define TOKEN_TELOTU 105
+#define TOKEN_SIGNED 98
+#define TOKEN_UNSIGNED 99
+#define TOKEN_EQ 200
+#define TOKEN_LT 201
+#define TOKEN_GT 202
+
+typedef struct {
+      int32_t type;
+      void *value;
+} Token;
+
+int32_t cur = 0;
+
+typedef struct {
+      size_t size;
+      size_t capacity;
+      Token *tokens;
+} Tokens;
+
+Tokens tokensNew() {
+      Tokens tokens;
+      tokens.capacity = 1;
+      tokens.size = 0;
+      tokens.tokens = calloc(1, sizeof(Token));
+      return tokens;
+}
+
+typedef struct {
+      bool lon;
+      Token nanpa;
+} NodeExpression;
+
+typedef struct {
+      bool lon;
+      NodeExpression expr;
+} NodeOtawa;
+
+typedef struct {
+      bool lon;
+      enum {
+            Nanpa,
+            Telo,
+            Pule,
+            Linja,
+      } type;
+      bool awen;
+} NodeType;
+
+typedef struct {
+      bool lon;
+      NodeType type;
+      Token name;
+      NodeExpression expr;
+} NodeO;
+  
+typedef enum {
+      Expression,
+      Otawa,
+      O,
+      Type,
+} TypeOfNode;
+
+typedef union {
+      NodeExpression expr;
+      NodeOtawa otawa;
+      NodeO o;
+      NodeType type;
+} NodeUnion;
+
+typedef struct {
+      TypeOfNode type;
+      NodeUnion node;
+} Node;
+
+typedef struct {
+      size_t size;
+      size_t capacity;
+      Node *nodes;
+} Nodes;
+
+Nodes nodesNew() {
+      Nodes nodes;
+      nodes.capacity = 1;
+      nodes.size = 0;
+      nodes.nodes = calloc(1, sizeof(Node));
+      return nodes;
+}; 
+
+typedef struct {
+      Nodes nodes;
+} Prog;
+
+void addToken(Tokens *tokens, Token token) {
+      tokens->size++;
+      if (tokens->size >= tokens->capacity) {
+            tokens->capacity *= 2;
+            tokens->tokens = realloc(tokens->tokens, sizeof(Token)*tokens->capacity);
+      }
+      tokens->tokens[tokens->size-1] = token;
+}
+
+Token getToken(Tokens *tokens, size_t index) {
+      if (index == tokens->size) {
+            fprintf(stderr, "ERROR: Token index out of bounds\n");
+            exit(1);
+      }
+      return tokens->tokens[index];
+}
+
+void addNode(Nodes *nodes, Node node) {
+      nodes->size++;
+      if (nodes->size >= nodes->capacity) {
+            nodes->capacity *= 2;
+            nodes->nodes = realloc(nodes->nodes, sizeof(Node)*nodes->capacity);
+      }
+      nodes->nodes[nodes->size-1] = node;
+}
+
+Node getNode(Nodes *nodes, size_t index) {
+      if (index == nodes->size) {
+            fprintf(stderr, "ERROR: Node index out of bounds\n");
+            exit(1);
+      }
+      return nodes->nodes[index];
+}
+
+typedef struct {
+      size_t size;
+      size_t capacity;
+      char **names;
+      size_t *values;
+} NameMap;
+
+NameMap nameMapNew() {
+      NameMap map;
+      map.capacity = 1;
+      map.size = 0;
+      map.names = calloc(1, sizeof(char*));
+      map.values = calloc(1, sizeof(size_t));
+      return map;
+}
+
+void addNameMap(NameMap *map, char *name, size_t value) {
+      map->size++;
+      if (map->size >= map->capacity) {
+            map->capacity *= 2;
+            map->names = realloc(map->names, sizeof(char*)*map->capacity);
+            map->values = realloc(map->values, sizeof(size_t)*map->capacity);
+      }
+      //map->names[size-1] = calloc(strlen(name), sizeof(char));
+      map->names[map->size-1] = strdup(name);
+      map->values[map->size-1] = value;
+}
+
+size_t getNameMap(NameMap *map, char *name) {
+      for (size_t i = 0; i < map->size; i++) {
+            if(!strcmp(name, map->names[i])) {
+                  return map->values[i];
+            }
+      }
+      return 0;
+}
+
+bool hasNameMap(NameMap *map, char *name) {
+      for (size_t i = 0; i < map->size; i++) {
+            if(!strcmp(name, map->names[i])) {
+                  return true;
+            }
+      }
+      return false;
+}
+
+char peek(char* buffer) {
+      //char c = fgetc(buffer);
+      //ungetc(c, buffer);
+      //return c;
+      if (buffer[cur] == 0) return EOF;
+      return buffer[cur];
+}
+
+NameMap vars;
+
+char consume(char* buffer) {
+      //return fgetc(buffer);
+      return buffer[cur++];
+}
+
+Tokens tokenize(char* buffer) {
+      char c;
+      Tokens tokens = tokensNew();
+      Tokens *tokensptr = &tokens;
+      cur = 0;
+      while ((c = peek(buffer)) != EOF) {
+            if (isalpha(c)) {
+                  int32_t firstchar = cur;
+                  while(isalnum(c = peek(buffer)) && c != EOF) {
+                        consume(buffer);
+                  }
+                  char *name = calloc(cur - firstchar, sizeof(char));
+                  
+                  strncpy(name, buffer+firstchar, cur - firstchar);
+                  name[cur - firstchar] = 0;
+                  Token token;
+                  char* prefix = "keyword";
+                  // check for keywords
+                  if (!strcmp(name, "otawa")) {
+                        token.type = TOKEN_OTAWA;
+                  } else if (!strcmp(name, "o")) {
+                        token.type = TOKEN_O;
+                  } else if (!strcmp(name, "nanpa")) {
+                        token.type = TOKEN_NANPA;
+                  } else if (!strcmp(name, "sitelen")) {
+                        token.type = TOKEN_SITELEN;
+                  } else if (!strcmp(name, "suli")) {
+                        token.type = TOKEN_SULI;
+                  } else if (!strcmp(name, "lili")) {
+                        token.type = TOKEN_LILI;
+                  } else if (!strcmp(name, "telotu")) {
+                        token.type = TOKEN_TELOTU;
+                  } else if (!strcmp(name, "signed")) {
+                        token.type = TOKEN_SIGNED;
+                  } else if (!strcmp(name, "unsigned")) {
+                        token.type = TOKEN_UNSIGNED;
+                  } else if (!strcmp(name, "la")) {
+                        token.type = TOKEN_LA;
+                  } else if (!strcmp(name, "ante")) {
+                        token.type = TOKEN_ANTE;
+                  } else if (!strcmp(name, "pi")) {
+                  } else if (!strcmp(name, "switch")) {
+                  } else if (!strcmp(name, "case")) {
+                  } else if (!strcmp(name, "default")) {
+                  } else if (!strcmp(name, "break")) {
+                  } else if (!strcmp(name, "struct")) {
+                  } else if (!strcmp(name, "enum")) {
+                  } else {
+                        token.type = TOKEN_NAME;
+                        token.value = name;
+                        prefix = "name";
+                  }
+                  if (debug) printf("%s: '%s'\n", prefix, name);
+                  addToken(tokensptr, token);
+            }
+            else if (isdigit(c)) {
+                  int32_t firstchar = cur;
+                  while(isalnum(c = peek(buffer)) && c != EOF) {
+                        consume(buffer);
+                  }
+                  char *number = calloc(cur - firstchar, sizeof(char));
+                  strncpy(number, buffer+firstchar, cur - firstchar);
+                  number[cur - firstchar] = 0;
+                  
+                  if (debug) printf("number: '%s'\n", number);
+                  Token token = (Token){.type = TOKEN_NUMBER, .value = number};
+                  addToken(&tokens, token);
+            }
+            else if (c == '"') {
+                  consume(buffer);
+                  int32_t firstchar = cur + 1;
+                  int32_t stringSize = 0;
+                  
+                  while(isalnum(c = peek(buffer)) && c != '"' && c != EOF) {
+                        c = consume(buffer);
+                        stringSize++;
+                  }
+                  
+                  char *string = calloc(cur - firstchar, sizeof(char));
+                  strncpy(string, buffer+firstchar, cur - firstchar);
+                  string[cur - firstchar] = 0;
+                  consume(buffer);
+
+                  Token token = (Token){.type = TOKEN_STRING_LITERAL, .value = string};
+                  if (debug) printf("string literal: %s\n", string);
+                  addToken(&tokens, token);
+            }
+            else if (c == ';') {             
+                  Token token = (Token){.type = TOKEN_SEMI, .value = 0};
+                  consume(buffer);
+                  if (debug) printf("semicolon\n");
+                  addToken(&tokens, token);
+            }
+            else if (c == '(') {
+                  if (debug) printf("oparen\n");
+                  consume(buffer);
+                  addToken(&tokens, (Token){.type = TOKEN_OPAREN});
+            }
+            else if (c == ')') {
+                  if (debug) printf("cparen\n");
+                  consume(buffer);
+                  addToken(&tokens, (Token){.type = TOKEN_CPAREN});
+            }
+            else if (c == '{') {
+                  if (debug) printf("ocurly\n");
+                  consume(buffer);
+                  addToken(&tokens, (Token){.type = TOKEN_OCURLY});
+            }
+            else if (c == '}') {
+                  if (debug) printf("ccurly\n");
+                  consume(buffer);
+                  addToken(&tokens, (Token){.type = TOKEN_CCURLY});
+            }
+            else if (c == ',') {
+                  if (debug) printf("comma\n");
+                  consume(buffer);
+                  addToken(&tokens, (Token){.type = TOKEN_COMMA});
+            }
+            else if (c == '=') {
+                  if (debug) printf("equals\n");
+                  consume(buffer);
+                  addToken(&tokens, (Token){.type = TOKEN_EQ});
+            }
+            else if (c == '<') {
+                  if (debug) printf("less than\n");
+                  consume(buffer);
+                  addToken(&tokens, (Token){.type = TOKEN_LT});
+            }
+            else if (c == '>') {
+                  if (debug) printf("greater than\n");
+                  consume(buffer);
+                  addToken(&tokens, (Token){.type = TOKEN_GT});
+            }
+            else if (c == ':') {
+                  if (debug) printf("colon\n");
+                  consume(buffer);
+                  addToken(&tokens, (Token){.type = TOKEN_COLON});
+            }
+
+            else if (isspace(c)) {
+                  consume(buffer);
+            }
+            else {                  
+                  if (debug) printf("Unexpected character %c\n", c);
+                  consume(buffer);
+            }
+
+      }
+      return tokens;
+}
+
+size_t curToken = 0;
+
+Token tokenPeek(Tokens *tokens) {
+      if (curToken >= tokens->size) return (Token) {.type = -1};
+      return tokens->tokens[curToken];
+}
+
+Token tokenConsume(Tokens *tokens) {
+      return tokens->tokens[curToken++];
+}
+
+NodeExpression parseExpr(Tokens *tokens) {
+      if (tokenPeek(tokens).type == TOKEN_NUMBER) {
+            Token token = tokenConsume(tokens);
+            return (NodeExpression) {.lon = true, .nanpa = token};
+      }
+      return (NodeExpression){.lon = false};
+}
+
+NodeOtawa parseOtawa(Tokens *tokens) {
+      if (tokenPeek(tokens).type == TOKEN_OTAWA) {
+            tokenConsume(tokens);
+            NodeExpression expr;
+            if ((expr = parseExpr(tokens)).lon == false) {
+                  fprintf(stderr, "No value given after otawa\n");
+                  exit(1);
+            }
+            if (tokenPeek(tokens).type != TOKEN_SEMI) {
+                  fprintf(stderr, "No semicolon after otawa\n");
+                  exit(1);
+            }
+            tokenConsume(tokens);
+            return (NodeOtawa){.expr = expr, .lon = true};
+      }
+}
+
+NodeType parseType(Tokens *tokens) {
+      if (tokenPeek(tokens).type == TOKEN_NANPA) {
+            tokenConsume(tokens);
+            return (NodeType) {.lon = true, .type = Nanpa, .awen = false};
+      }
+      return (NodeType) {.lon = false};
+};
+
+NodeO parseO(Tokens *tokens) {
+      if (tokenPeek(tokens).type == TOKEN_O) {
+            tokenConsume(tokens);
+            if (!tokenPeek(tokens).type != TOKEN_NAME) {
+                  fprintf(stderr, "No name after o\n");
+                  exit(1);
+            }
+            Token name = tokenConsume(tokens);
+            
+            if (!tokenPeek(tokens).type != TOKEN_LI) {
+                  fprintf(stderr, "No li after o\n");
+                  exit(1);
+            }
+            tokenConsume(tokens);
+
+            NodeType type = parseType(tokens);
+
+            if (!type.lon) {
+                  fprintf(stderr, "No type after o\n");
+                  exit(1);                  
+            }
+            
+            if (!tokenPeek(tokens).type != TOKEN_SEMI) {
+                  fprintf(stderr, "No ';' after o\n");
+                  exit(1);                  
+            }
+
+            return (NodeO){.lon = true, .type = type, .name = name};
+      }
+      return (NodeO){.lon = false};
+}
+
+
+Prog parse(Tokens *tokens) {
+      Prog program;
+      program.nodes = nodesNew();
+      while(tokenPeek(tokens).type != -1) {
+            Token token = tokenPeek(tokens);
+            if (token.type == TOKEN_OTAWA) {
+                  NodeOtawa node = parseOtawa(tokens);
+                  if (!node.lon) {
+                        fprintf(stderr, "Unable to parse O-expression\n");
+                        exit(1);
+                  }
+                  addNode(&program.nodes, (Node){.type = Otawa, .node.otawa = node});
+            } else if (token.type == TOKEN_O) {
+                  NodeO node = parseO(tokens);
+                  if (!node.lon) {
+                        fprintf(stderr, "Unable to parse O-expression\n");
+                        exit(1);
+                  }
+                  addNode(&program.nodes, (Node){.type = O, .node.o = node});
+            }
+      }
+      return program;
+}
+
+size_t stackOffset = 0;
+
+void push(size_t i) {
+      printf("    mov rax, %d\n"
+             "    push rax\n",
+             i);
+      stackOffset++;
+}
+
+void pop(char* reg) {
+      printf("    pop %s\n",
+             reg);
+      stackOffset--;
+}
+
+void generateExpression(NodeExpression expr) {
+      push(atoi(expr.nanpa.value));
+}
+
+void generateO(NodeO o) {
+      generateExpression(o.expr);
+      pop("rax");
+      printf("push rax");
+      addNameMap(&vars, o.name.value, stackOffset);
+}
+
+void generateOtawa(NodeOtawa otawa) {
+      generateExpression(otawa.expr);
+      pop("rdi");
+      printf("    mov rax, 60\n"
+             "    syscall\n");
+}
+
+void generate(Prog prog) {
+      printf("global _start\n"
+             "_start:\n");
+      for (size_t i = 0; i < prog.nodes.size; i++) {
+            Node node = getNode(&prog.nodes, i);
+            if (node.type == Otawa) generateOtawa(node.node.otawa);
+            else if (node.type == O) generateO(node.node.o);
+      }
+      
+      printf("    mov rax, 60\n"
+             "    mov rdi, 0\n"
+             "    syscall\n");
+}
+      
+char* file_to_charptr_new(char* filename) {
+      char * buffer = 0;
+      long length;
+      FILE * f = fopen (filename, "rb");
+      if (f)
+            {
+                  fseek (f, 0, SEEK_END);
+                  length = ftell (f);
+                  fseek (f, 0, SEEK_SET);
+                  buffer = malloc (length);
+                  if (buffer)
+                        {
+                              fread (buffer, 1, length, f);
+                        }
+                  fclose (f);
+            }
+      if (buffer) {
+               return buffer;
+      }
+      else {
+            printf("ERROR file not found\n");
+            exit(0);
+      }
+}
+
+int main(int argc, char **argv) {
+      if(argc == 0) return 1;
+      //printf("%s\n", argv[1]);
+      vars = nameMapNew();
+      
+      size_t length = 0;
+      char *f = file_to_charptr_new(argv[1]);
+      //printf("Length is %zu\n File is\n %s", length, f);
+      //FILE *fp = fopen(argv[1], "rb");
+      Tokens tokens = tokenize(f);
+      if (debug) for (size_t i = 0; i < tokens.size; i++) {
+                  printf("Token number: %d\n", (int)getToken(&tokens, i).type);
+      }
+      generate(parse(&tokens));
+      free(f);
+      return 0;
+}
+
+

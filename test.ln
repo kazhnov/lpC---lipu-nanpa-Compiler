@@ -1,0 +1,7 @@
+o x li nanpa = 5;
+o y li nanpa = x;
+o z li nanpa = 6;
+o w li nanpa = y;
+
+
+otawa w;

@@ -1,0 +1,17 @@
+#kepeken "ltpkp.ll"
+
+o s li nanpa = 5;
+o i li telo = 0.3t;
+o p li awen Pule = ala;
+o ln li awen linja = "omekalike";
+
+pali wawa (nimi_lanpan li linja mute) pana nanpa {
+      nimi_lanpan.suli() > 0 la {
+            otokis("sina toki e nimi %l\s", nimi_lanpan.pi(1));
+      } ante {
+            otokis_pi(pakalapkp, "sina pali e pakala a!\s");
+            otawa(1);
+      }
+      
+      opana 0;
+}
